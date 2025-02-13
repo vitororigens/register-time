@@ -5,9 +5,11 @@ import { MonthlyView } from './components/MonthlyView';
 import { LoginScreen } from './components/LoginScreen';
 import { TimeEntry, MonthlyReport } from './types';
 import { calculateHours } from './utils/dateUtils';
-import { auth } from './config/firebase';
+import { auth, database } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { ref, onValue, set } from 'firebase/database';
 import { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 
 function App() {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
@@ -19,20 +21,62 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setIsAuthenticated(!!user);
       setIsLoading(false);
+
+      if (user) {
+        // Carregar entradas do usuário
+        const entriesRef = ref(database, `entries/${user.uid}`);
+        onValue(entriesRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            const entriesArray = Object.values(data) as TimeEntry[];
+            setEntries(entriesArray);
+          } else {
+            setEntries([]);
+          }
+        });
+
+        // Carregar relatórios mensais
+        const reportsRef = ref(database, `reports/${user.uid}`);
+        onValue(reportsRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            const reportsArray = Object.values(data) as MonthlyReport[];
+            setMonthlyReports(reportsArray);
+          } else {
+            setMonthlyReports([]);
+          }
+        });
+      }
     });
 
     return () => unsubscribe();
   }, []);
 
-  const handleTimeEntry = (entry: Omit<TimeEntry, 'id'>) => {
+  const handleTimeEntry = async (entry: Omit<TimeEntry, 'id'>) => {
+    if (!auth.currentUser) return;
+
     const newEntry = {
       ...entry,
       id: Date.now().toString(),
+      userId: auth.currentUser.uid,
     };
-    setEntries([...entries, newEntry]);
+
+    try {
+      const entryRef = ref(
+        database,
+        `entries/${auth.currentUser.uid}/${newEntry.id}`
+      );
+      await set(entryRef, newEntry);
+      toast.success('Registro salvo com sucesso!');
+    } catch (error) {
+      console.error('Erro ao salvar registro:', error);
+      toast.error('Erro ao salvar registro. Tente novamente.');
+    }
   };
 
-  const handleCloseMonth = (month: number, year: number) => {
+  const handleCloseMonth = async (month: number, year: number) => {
+    if (!auth.currentUser) return;
+
     const monthEntries = entries.filter(entry => {
       const entryDate = new Date(entry.date);
       return entryDate.getMonth() + 1 === month && entryDate.getFullYear() === year;
@@ -42,15 +86,26 @@ function App() {
       return acc + calculateHours(entry.startTime, entry.endTime, entry.breakDuration);
     }, 0);
 
+    const reportId = `${year}-${month}`;
     const newReport: MonthlyReport = {
-      employeeId: auth.currentUser?.uid || '1',
+      employeeId: auth.currentUser.uid,
       month,
       year,
       totalHours,
       status: 'closed',
     };
 
-    setMonthlyReports([...monthlyReports, newReport]);
+    try {
+      const reportRef = ref(
+        database,
+        `reports/${auth.currentUser.uid}/${reportId}`
+      );
+      await set(reportRef, newReport);
+      toast.success('Mês fechado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao fechar mês:', error);
+      toast.error('Erro ao fechar mês. Tente novamente.');
+    }
   };
 
   const currentDate = new Date();

@@ -6,6 +6,7 @@ export interface Employee {
 
 export interface TimeEntry {
   id: string;
+  userId: string;
   employeeId: string;
   taskName: string;
   date: string;
