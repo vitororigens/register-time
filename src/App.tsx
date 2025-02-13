@@ -7,9 +7,9 @@ import { TimeEntry, MonthlyReport } from './types';
 import { calculateHours } from './utils/dateUtils';
 import { auth, database } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ref, onValue, set } from 'firebase/database';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
+import { doc, setDoc, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
 
 function App() {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
@@ -18,34 +18,26 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsAuthenticated(!!user);
       setIsLoading(false);
 
       if (user) {
-        // Carregar entradas do usuário
-        const entriesRef = ref(database, `entries/${user.uid}`);
-        onValue(entriesRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data) {
-            const entriesArray = Object.values(data) as TimeEntry[];
-            setEntries(entriesArray);
-          } else {
-            setEntries([]);
-          }
-        });
+        try {
+          // Carregar entradas do usuário
+          const entriesQuery = query(collection(database, `users/${user.uid}/entries`));
+          const entriesSnapshot = await getDocs(entriesQuery);
+          const entriesArray = entriesSnapshot.docs.map(doc => doc.data() as TimeEntry);
+          setEntries(entriesArray);
 
-        // Carregar relatórios mensais
-        const reportsRef = ref(database, `reports/${user.uid}`);
-        onValue(reportsRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data) {
-            const reportsArray = Object.values(data) as MonthlyReport[];
-            setMonthlyReports(reportsArray);
-          } else {
-            setMonthlyReports([]);
-          }
-        });
+          // Carregar relatórios mensais
+          const reportsQuery = query(collection(database, `users/${user.uid}/reports`));
+          const reportsSnapshot = await getDocs(reportsQuery);
+          const reportsArray = reportsSnapshot.docs.map(doc => doc.data() as MonthlyReport);
+          setMonthlyReports(reportsArray);
+        } catch (error) {
+          console.error('Erro ao carregar dados:', error);
+        }
       }
     });
 
@@ -53,7 +45,10 @@ function App() {
   }, []);
 
   const handleTimeEntry = async (entry: Omit<TimeEntry, 'id'>) => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser) {
+      console.error('Usuário não autenticado');
+      return;
+    }
 
     const newEntry = {
       ...entry,
@@ -62,11 +57,8 @@ function App() {
     };
 
     try {
-      const entryRef = ref(
-        database,
-        `entries/${auth.currentUser.uid}/${newEntry.id}`
-      );
-      await set(entryRef, newEntry);
+      const userEntriesCollection = collection(database, `users/${auth.currentUser.uid}/entries`);
+      await addDoc(userEntriesCollection, newEntry);
       toast.success('Registro salvo com sucesso!');
     } catch (error) {
       console.error('Erro ao salvar registro:', error);
@@ -96,11 +88,8 @@ function App() {
     };
 
     try {
-      const reportRef = ref(
-        database,
-        `reports/${auth.currentUser.uid}/${reportId}`
-      );
-      await set(reportRef, newReport);
+      const userReportsDoc = doc(database, `users/${auth.currentUser.uid}/reports/${reportId}`);
+      await setDoc(userReportsDoc, newReport);
       toast.success('Mês fechado com sucesso!');
     } catch (error) {
       console.error('Erro ao fechar mês:', error);
